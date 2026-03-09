@@ -1,0 +1,304 @@
+// =============================================================================
+// PaperCut Module Template
+// =============================================================================
+//
+// HOW TO USE THIS TEMPLATE:
+//   1. Copy this file and rename it to your_module_name.go
+//   2. Replace "TemplateModule" with your module struct name
+//   3. Replace "template_module" with your module's snake_case name
+//   4. Fill in the module metadata, options, Check(), and Exploit()
+//   5. That's it! The init() function auto-registers the module — no other files to edit
+//
+// CATEGORY GUIDELINES:
+//   - SAFE:   Read-only operations, test connections, or actions that restore
+//             original settings after execution. No permanent changes.
+//   - UNSAFE: Modifies device settings that may not be automatically reverted.
+//             User is responsible for cleanup.
+//
+// NAMING CONVENTIONS:
+//   - Module name: manufacturer/method/module_name (e.g., ricoh/ldap/passback)
+//     - manufacturer: the device vendor (ricoh, sharp, konica, etc.)
+//     - method: the protocol or attack vector (ldap, smtp, soap, http, etc.)
+//     - module_name: descriptive name for the specific exploit (passback, pwd_extract, etc.)
+//   - Options: UPPERCASE for module-specific options (RHOST, RPORT, LHOST, etc.)
+//   - The shell routes `set UPPERCASE` to module options and `set lowercase`
+//     to global options, so always use UPPERCASE for your option names.
+//
+// VERBOSE OUTPUT CONVENTION:
+//   - Use 2-space indent before output indicators for verbose/debug messages:
+//       output.Info("  Detailed step info...")    // verbose (indented)
+//       output.Info("Top-level status...")         // normal (not indented)
+//   - This visually differentiates debug output from primary status messages.
+//
+// TLS / SSL NOTES:
+//   - Printers and MFPs almost always run ancient TLS (1.0/1.1) with weak
+//     cipher suites. We never need to verify certificates for these devices.
+//   - Use the shared modules.AllCiphers() helper from internal/modules/tls.go
+//     to include all cipher suites (secure + insecure) so connections succeed.
+//   - Always set InsecureSkipVerify: true, MinVersion: tls.VersionTLS10,
+//     and CipherSuites: modules.AllCiphers() on your HTTP client's TLS config.
+//   - Add an SSL option (default "false") so users can toggle http/https.
+//     When SSL is true, construct URLs with "https://", otherwise "http://".
+//
+// =============================================================================
+
+package safe
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/cookiejar"
+	"time"
+
+	"papercut/internal/modules"
+	"papercut/internal/output"
+)
+
+// Auto-register: this init() call is all you need. No other files to edit.
+func init() { register(func() modules.ExploitModule { return NewTemplateModule() }) }
+
+// TemplateModule implements [describe what your module does].
+//
+// Category: SAFE — [explain why it's safe, e.g., "read-only extraction, no settings modified"]
+type TemplateModule struct {
+	modules.BaseModule
+}
+
+// NewTemplateModule creates a new instance of the template module.
+func NewTemplateModule() *TemplateModule {
+	m := &TemplateModule{
+		BaseModule: modules.BaseModule{
+			Mod: modules.Module{
+				// Name: manufacturer/method/module_name identifier used in `use` and `search` commands
+				// Examples: ricoh/ldap/passback, sharp/smtp/mx2640_passback, konica/soap/pwd_extract
+				Name: "manufacturer/method/module_name",
+
+				// Description: shown in search results table (keep under ~80 chars)
+				Description: "Template — short description of what this module does",
+
+				// Manufacturer: used for search filtering (e.g., "Ricoh", "Konica Minolta")
+				Manufacturer: "Generic",
+
+				// Category: "SAFE" or "UNSAFE" (see guidelines above)
+				Category: "SAFE",
+
+				// Authors: credit for module development
+				Authors: []string{"YourName"},
+
+				// Tags: additional search keywords
+				Tags: []string{"template", "example"},
+
+				// Models: known compatible printer models (searchable via `search`)
+				Models: []string{"Model-1234", "Model-5678"},
+			},
+			Opts: []*modules.Option{
+				// Required options (user must set before run/check)
+				{Name: "RHOST", Default: "", Required: true, Description: "Target IP address"},
+				{Name: "RPORT", Default: "80", Required: false, Description: "Target port"},
+
+				// Listener options — only if your module uses a pass-back/callback technique
+				// {Name: "LHOST", Default: "", Required: true, Description: "Listening IP for callback"},
+				// {Name: "LPORT", Default: "389", Required: false, Description: "Listening port for callback"},
+
+				// Authentication options
+				{Name: "USERNAME", Default: "admin", Required: false, Description: "Login username"},
+				{Name: "PASSWORD", Default: "", Required: false, Description: "Login password"},
+
+				// SSL — include for any module that makes HTTP requests to the target.
+				// Controls http:// vs https:// scheme. TLS cert verification is always
+				// disabled since these are printers/MFPs with self-signed certs.
+				{Name: "SSL", Default: "false", Required: false, Description: "Use HTTPS instead of HTTP"},
+
+				// Standard options (most modules should include these)
+				{Name: "VERBOSE", Default: "false", Required: false, Description: "Verbose output"},
+				{Name: "TIMEOUT", Default: "20", Required: false, Description: "Request timeout in seconds"},
+				{Name: "PROXY", Default: "", Required: false, Description: "Proxy URL (set globally)"},
+			},
+		},
+	}
+	m.InitDefaults() // Sets each option's Value to its Default — always call this
+	return m
+}
+
+// newHTTPClient creates an HTTP client configured for printer/MFP targets.
+// Uses modules.NewHTTPTransport() which handles TLS config (accept any cert,
+// legacy TLS versions/ciphers) and proxy support automatically.
+func (t *TemplateModule) newHTTPClient() (*http.Client, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("create cookie jar: %w", err)
+	}
+	return &http.Client{
+		Jar:       jar,
+		Timeout:   time.Duration(t.IntVal("TIMEOUT", 20)) * time.Second,
+		Transport: modules.NewHTTPTransport(t.Val("PROXY")),
+	}, nil
+}
+
+// Check tests whether the target is vulnerable or accepts default credentials.
+// Return a CheckResult with Success=true if the target is exploitable.
+// Return ErrNotSupported if your module doesn't support Check.
+func (t *TemplateModule) Check() (*modules.CheckResult, error) {
+	// Validate required options are set
+	if err := t.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Extract options using BaseModule helpers
+	rhost := t.Val("RHOST")
+	rport := t.Val("RPORT")
+	verbose := t.BoolVal("VERBOSE")
+	// username := t.Val("USERNAME")
+	// password := t.Val("PASSWORD")
+
+	// Build base URL using SSL option to select scheme
+	scheme := "http"
+	if t.BoolVal("SSL") {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s:%s", scheme, rhost, rport)
+
+	output.Info("Checking %s...", baseURL)
+
+	if verbose {
+		output.Info("  Connecting to target...")
+	}
+
+	// Create HTTP client (handles TLS for legacy devices automatically)
+	// client, err := t.newHTTPClient()
+	// if err != nil {
+	//     return nil, err
+	// }
+
+	// -------------------------------------------------------------------------
+	// TODO: Implement your check logic here.
+	//
+	// Common patterns:
+	//   - HTTP request to verify service is running
+	//   - Attempt login with default credentials
+	//   - Send a probe packet and check the response
+	//
+	// Return early with Success=false (not an error) for failed checks:
+	//   return &modules.CheckResult{
+	//       Success: false,
+	//       Target:  rhost,
+	//       Port:    t.IntVal("RPORT", 80),
+	//       Details: "Service not detected",
+	//   }, nil
+	// -------------------------------------------------------------------------
+
+	_ = verbose // remove when used
+	_ = baseURL // remove when used
+
+	return &modules.CheckResult{
+		Success:  false,
+		Target:   rhost,
+		Port:     t.IntVal("RPORT", 80),
+		Username: t.Val("USERNAME"),
+		Password: t.Val("PASSWORD"),
+		Details:  "TODO: implement check",
+	}, nil
+}
+
+// Exploit performs the full exploitation against the target.
+// Return an ExploitResult with captured data in the Data field.
+// Return ErrNotSupported if your module doesn't support Exploit.
+func (t *TemplateModule) Exploit() (*modules.ExploitResult, error) {
+	// Validate required options
+	if err := t.Validate(); err != nil {
+		return nil, err
+	}
+
+	rhost := t.Val("RHOST")
+	portInt := t.IntVal("RPORT", 80)
+	verbose := t.BoolVal("VERBOSE")
+	// timeout := t.IntVal("TIMEOUT", 20)
+
+	// Build base URL using SSL option to select scheme
+	scheme := "http"
+	if t.BoolVal("SSL") {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s:%s", scheme, rhost, portInt)
+
+	output.Info("Exploiting %s...", baseURL)
+
+	// Create HTTP client (handles TLS for legacy devices automatically)
+	// client, err := t.newHTTPClient()
+	// if err != nil {
+	//     return nil, err
+	// }
+
+	// -------------------------------------------------------------------------
+	// TODO: Implement your exploit logic here.
+	//
+	// For modules that use a listener (pass-back attacks):
+	//
+	//   lhost := t.Val("LHOST")
+	//   lport := t.Val("LPORT")
+	//   listenAddr := fmt.Sprintf("%s:%s", lhost, lport)
+	//
+	//   ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	//   defer cancel()
+	//
+	//   credsCh := make(chan *listener.LDAPCreds, 1)  // or FTPCreds, SMTPCreds, etc.
+	//   errCh := make(chan error, 1)
+	//
+	//   go func() {
+	//       creds, err := listener.ListenLDAP(ctx, listenAddr, time.Duration(timeout)*time.Second, verbose)
+	//       if err != nil {
+	//           errCh <- err
+	//           return
+	//       }
+	//       credsCh <- creds
+	//   }()
+	//
+	//   time.Sleep(500 * time.Millisecond) // let listener start
+	//
+	//   // ... trigger the callback from the target device ...
+	//
+	//   select {
+	//   case creds := <-credsCh:
+	//       // Success — return captured credentials
+	//   case err := <-errCh:
+	//       // Listener error
+	//   case <-ctx.Done():
+	//       // Timeout
+	//   }
+	//
+	// Available listeners (internal/listener/):
+	//   listener.ListenLDAP(ctx, addr, timeout, verbose)         -> *LDAPCreds
+	//   listener.ListenFTP(ctx, addr, timeout, verbose)          -> *FTPCreds
+	//   listener.ListenSMTP(ctx, addr, timeout, verbose)         -> *SMTPCreds
+	//   listener.ListenHTTP(ctx, addr, timeout, useTLS, verbose) -> *HTTPCreds
+	//   listener.ListenSMB(ctx, addr, timeout, verbose)          -> *SMBCreds
+	//
+	// For modules that extract data directly (no listener):
+	//   - Make HTTP/SOAP/API requests to the target
+	//   - Parse responses for credentials or sensitive data
+	//   - Return extracted data in ExploitResult.Data
+	// -------------------------------------------------------------------------
+
+	_ = verbose // remove when used
+	_ = baseURL // remove when used
+
+	return &modules.ExploitResult{
+		Success: false,
+		Target:  rhost,
+		Port:    portInt,
+		Details: "TODO: implement exploit",
+		Data:    "",
+	}, fmt.Errorf("module not implemented")
+}
+
+// =============================================================================
+// REGISTRATION
+// =============================================================================
+//
+// The init() function at the top of this file auto-registers the module.
+// You don't need to edit any other files — just create your module .go file
+// with the init() call and it will appear in `search` results automatically.
+//
+// For SAFE modules, place the file in internal/modules/safe/
+// For UNSAFE modules, place the file in internal/modules/unsafe/
+// =============================================================================
