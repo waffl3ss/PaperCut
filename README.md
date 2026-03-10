@@ -345,9 +345,9 @@ papercut [engagement1] > creds
 ╭─────────────┬──────┬──────────────────────────────┬───────────────┬─────────────────────────────┬──────────╮
 │ HOST        │ PORT │ USERNAME                     │ PASSWORD      │ MODULE                      │ PROTOCOL │
 ├─────────────┼──────┼──────────────────────────────┼───────────────┼─────────────────────────────┼──────────┤
-│ 10.0.0.5    │ 80   │ cn=ldap_user,dc=corp,dc=local│ LdapP@ssw0rd!│ ricoh/ldap/passback         │ LDAP     │
-│ 10.0.0.20   │ 80   │ smtp_user                    │ SmtpPass123  │ sharp/smtp/mx2640_passback  │ SMTP     │
-│ 10.0.0.30   │ 50001│ admin                        │ P@ssw0rd     │ konica/soap/pwd_extract     │ SMB      │
+│ 10.0.0.5    │ 80   │ cn=ldap_user,dc=corp,dc=local│ LdapP@ssw0rd! │ ricoh/ldap/passback         │ LDAP     │
+│ 10.0.0.20   │ 80   │ smtp_user                    │ SmtpPass123   │ sharp/smtp/mx2640_passback  │ SMTP     │
+│ 10.0.0.30   │ 50001│ admin                        │ P@ssw0rd      │ konica/soap/pwd_extract     │ SMB      │
 ╰─────────────┴──────┴──────────────────────────────┴───────────────┴─────────────────────────────┴──────────╯
 ```
 
