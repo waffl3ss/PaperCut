@@ -15,7 +15,7 @@ The framework and core modules are complete, but community support is needed to 
     \__|      \_______|$$  ____/  \_______|\__|       \______/  \______/    \____/
                        $$ |
                        $$ |    Printer Exploitation Framework
-                       \__|    #Waffl3ss                 v0.7
+                       \__|    #Waffl3ss                 v0.7.1
   Type 'help' for available commands. Tab completion is available.
 
 PaperCut > workspace create DEMO
@@ -237,7 +237,7 @@ The `-t` flag accepts:
 | `threads` | 20 | Number of concurrent worker goroutines |
 | `timeout` | 2s | TCP connection timeout per host |
 | `rate` | 0 (unlimited) | Max new connections per second |
-| `proxy` | (none) | SOCKS proxy for connections (socks5://host:port) |
+| `proxy` | (none) | Proxy URL: `socks5://`, `socks4://`, `socks4a://`, `http://`, `https://` (see [Proxy Support](#proxy-support)) |
 
 ## Modules
 
@@ -258,10 +258,12 @@ Each module has two phases:
 | `sharp/smtp/mx2640_passback` | SAFE | SMTP/POP3 pass-back via test button | Sharp MX-2640N |
 | `sharp/smtp/mxb468_passback` | UNSAFE | SMTP pass-back via webglue API | Sharp MX-B468F |
 | `canon/http/pwd_extract` | SAFE | LDIF address book export | Canon iR-ADV C2030, C5030, C5235, C7065, and more |
-| `brother/http/default_pwd` | SAFE | CVE-2024-51977/51978 serial-based password derivation | 689+ Brother models |
+| `brother/http/default_pwd` | SAFE | CVE-2024-51977/51978 serial-based password derivation (check only*) | 689+ Brother models |
 | `kyocera/soap/addr_book_extract` | SAFE | CVE-2022-1026 unauthenticated SOAP extraction | Kyocera ECOSYS, TASKalfa series |
 | `xerox/ldap/workcentre_passback` | SAFE | LDAP pass-back via config modification | Xerox WorkCentre 5735, 5740, 5745, 5755 |
 | `xerox/pjl/pwd_extract` | UNSAFE | DLM firmware injection for password extraction | Xerox WorkCentre 5735, 5745, 5755, 5765, 5775 |
+
+\* `brother/http/default_pwd` currently implements `check` only: it pulls the serial from `/etc/mnt_info.csv` (or the `SERIAL` option), derives the default admin password, and validates it with a login. The `run` phase (CVE-2024-51984 LDAP/FTP pass-back) is not implemented yet and returns an error. The `LHOST`/`LPORT` options are placeholders for it.
 
 Use `search` to discover modules by name, manufacturer, technique, or compatible printer model:
 
@@ -280,6 +282,25 @@ papercut > search CVE-2022
 
 **Password Derivation** - Exploit deterministic password generation (e.g., Brother devices where the admin password is derived from the serial number) to gain authenticated access.
 
+### Credential Listeners
+
+Pass-back modules use built-in protocol listeners (`internal/listener/`) to capture credentials. Each listener binds to `LHOST:LPORT`, accepts one connection, handles enough of the protocol to get the client to authenticate, returns the captured credentials, and shuts down. If no callback arrives before the module's `TIMEOUT`, the module stops with a timeout error.
+
+| Listener | Default Port | Captures |
+|---|---|---|
+| LDAP | 389 | Simple bind DN and password (replies with BindResponse success) |
+| SMTP | 25 | `AUTH LOGIN` / `AUTH PLAIN` username and password |
+| POP3 | 110 | `USER`/`PASS`, `AUTH PLAIN`, `AUTH LOGIN` credentials, or `AUTH CRAM-MD5` username (used for POP-before-SMTP) |
+| FTP | 21 | `USER` / `PASS` credentials |
+| HTTP / HTTPS | 80 / 443 | Basic auth credentials, or NTLM hash (HTTPS uses an auto-generated self-signed cert) |
+| SMB2 | 445 | NetNTLMv2 hash via full SMB2 negotiate + NTLMSSP challenge-response |
+
+NTLM hashes from the HTTP and SMB listeners are output in hashcat mode 5600 format (`user::domain:challenge:NTProofStr:blob`) and can be cracked directly.
+
+Current modules use the LDAP, SMTP, and POP3 listeners. FTP, HTTP/S, and SMB are available for new modules. See [Writing New Modules](#writing-new-modules).
+
+Binding to ports below 1024 requires root/Administrator privileges. If you use a high `LPORT`, make sure the printer setting you redirect can point at that port.
+
 ## Scanner
 
 PaperCut identifies printers by connecting to port 9100 (JetDirect/PJL) and sending:
@@ -292,17 +313,24 @@ Non-printer services on port 9100 (HTTP servers, SSH, SMTP, etc.) are automatica
 
 ## Proxy Support
 
-PaperCut supports routing traffic through SOCKS proxies:
+PaperCut supports routing traffic through SOCKS and HTTP proxies:
 
 ```
 papercut > set proxy socks5://127.0.0.1:1080
 papercut > set proxy socks4://127.0.0.1:1080
+papercut > set proxy http://127.0.0.1:8080
 ```
 
-- **Scanner**: SOCKS4/4a/5 for raw TCP PJL connections
-- **Modules**: SOCKS4/4a/5 and HTTP/HTTPS proxies for HTTP-based exploits
+| Proxy type | Scanner (PJL/9100) | Modules (HTTP/SOAP) |
+|---|---|---|
+| `socks5://` | Yes | Yes |
+| `socks4://` / `socks4a://` | Yes | Yes |
+| `http://` / `https://` | **No** (cannot tunnel raw TCP) | Yes |
+
 - Bare `host:port` defaults to SOCKS5
+- With an HTTP proxy set, `scan` prints a warning and aborts. Use a SOCKS proxy for scanning
 - Per-module PROXY option available; global proxy takes precedence when set
+- Listeners for pass-back attacks bind locally on `LHOST` and are not proxied, so the printer must be able to reach `LHOST` directly
 
 To clear: `set proxy none`
 
@@ -345,9 +373,9 @@ papercut [engagement1] > creds
 ╭─────────────┬──────┬──────────────────────────────┬───────────────┬─────────────────────────────┬──────────╮
 │ HOST        │ PORT │ USERNAME                     │ PASSWORD      │ MODULE                      │ PROTOCOL │
 ├─────────────┼──────┼──────────────────────────────┼───────────────┼─────────────────────────────┼──────────┤
-│ 10.0.0.5    │ 80   │ cn=ldap_user,dc=corp,dc=local│ LdapP@ssw0rd! │ ricoh/ldap/passback         │ LDAP     │
-│ 10.0.0.20   │ 80   │ smtp_user                    │ SmtpPass123   │ sharp/smtp/mx2640_passback  │ SMTP     │
-│ 10.0.0.30   │ 50001│ admin                        │ P@ssw0rd      │ konica/soap/pwd_extract     │ SMB      │
+│ 10.0.0.5    │ 80   │ cn=ldap_user,dc=corp,dc=local│ LdapP@ssw0rd!│ ricoh/ldap/passback         │ LDAP     │
+│ 10.0.0.20   │ 80   │ smtp_user                    │ SmtpPass123  │ sharp/smtp/mx2640_passback  │ SMTP     │
+│ 10.0.0.30   │ 50001│ admin                        │ P@ssw0rd     │ konica/soap/pwd_extract     │ SMB      │
 ╰─────────────┴──────┴──────────────────────────────┴───────────────┴─────────────────────────────┴──────────╯
 ```
 
@@ -430,7 +458,7 @@ Submit a pull request and get it merged into the project!
 - **SAFE** modules must not permanently modify device settings
 - **UNSAFE** modules should restore settings on a best-effort basis
 - Verbose output uses 2-space indentation: `output.Info("  Detail...")` to visually separate debug from primary status
-- For pass-back attacks, use the listener package (`internal/listener/`) - the template includes a full example
+- For pass-back attacks, use the listener package (`internal/listener/`) - the template includes a full example. Every listener follows the same signature: `listener.Listen{LDAP,FTP,POP3,SMTP,SMB}(ctx, addr, timeout, verbose)`, plus `ListenHTTP(ctx, addr, timeout, useTLS, verbose)`. Run it in a goroutine with a creds/error channel pair, then trigger the printer's outbound connection
 - For HTTP clients, use `modules.NewHTTPTransport(proxy)` which handles legacy TLS, self-signed certs, and proxy routing
 - Return `modules.ErrNotSupported` from `Check()` or `Exploit()` if your module doesn't support one phase
 

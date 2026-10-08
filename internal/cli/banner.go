@@ -13,7 +13,7 @@ const banner = `
     \__|      \_______|$$  ____/  \_______|\__|       \______/  \______/    \____/
                        $$ |
                        $$ |    Printer Exploitation Framework
-                       \__|    #Waffl3ss                 v0.7
+                       \__|    #Waffl3ss                 v0.7.1
 `
 
 func PrintBanner() {
